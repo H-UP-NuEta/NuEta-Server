@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "nu-eta"
+version = "0.1.0"
+description = "H-UP Project"
+authors = ["Park Dongkyu <86235780+dong99u@users.noreply.github.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "3.10.12"
+matplotlib = "^3.8.4"
+gitpython = "^3.1.43"
+numpy = "^1.26.4"
+opencv-python = "^4.9.0.80"
+pillow = "^10.3.0"
+psutil = "^5.9.8"
+pyyaml = "^6.0.1"
+requests = "^2.31.0"
+scipy = "^1.13.0"
+thop = "^0.1.1.post2209072238"
+torch = "^2.2.2"
+torchvision = "^0.17.2"
+tqdm = "^4.66.2"
+ultralytics = "^8.1.45"
+setuptools = "^69.2.0"
+wheel = "^0.43.0"
+fastapi = "^0.110.1"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.3.0"
+flake8 = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
