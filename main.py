@@ -7,6 +7,7 @@ import io
 import torch
 import cv2
 import numpy as np
+from tempfile import NamedTemporaryFile
 
 app = FastAPI()
 
@@ -106,3 +107,53 @@ async def upload_image(file: UploadFile = File(...)):
 
     # StreamingResponse 객체 생성 및 반환
     return StreamingResponse(image_stream, media_type="image/jpeg")
+
+def apply_mosaic_to_video(video_path):
+    cap = cv2.VideoCapture(video_path)
+    # 임시 파일 생성으로 결과 동영상 저장 준비
+    temp_file = NamedTemporaryFile(delete=False, suffix='.mp4')
+    temp_filename = temp_file.name
+    temp_file.close()
+
+    # 동영상 저장 설정
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(temp_filename, fourcc, 30.0, (int(cap.get(3)), int(cap.get(4))))
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # 프레임 처리
+        results = model(frame)
+        results_data = results.pandas().xyxy[0]
+        bboxes = results_data[["xmin", "ymin", "xmax", "ymax"]].values.tolist()
+
+        for bbox in bboxes:
+            bbox = list(map(int, bbox))
+            frame = apply_mosaic(frame, bbox, 15)
+
+        out.write(frame)
+
+    cap.release()
+    out.release()
+
+    return temp_filename
+
+@app.post("/video/upload")
+async def upload_video(file: UploadFile = File(...)):
+    # 동영상 파일을 임시 파일로 저장
+    with NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    # 모자이크 처리 적용된 동영상 생성
+    output_video_path = apply_mosaic_to_video(temp_file_path)
+
+    # 생성된 동영상을 읽어 StreamingResponse로 반환
+    def iterfile():
+        with open(output_video_path, mode="rb") as file_like:
+            yield from file_like
+
+    return StreamingResponse(iterfile(), media_type="video/mp4")
