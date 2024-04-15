@@ -11,16 +11,18 @@ from tempfile import NamedTemporaryFile
 
 app = FastAPI()
 
-# YOLOv5 모델 로드
-model = torch.hub.load(
-    "ultralytics/yolov5", "custom", path="./best.pt"
-)  # 'best.pt' 파일 경로를 지정
+def load_model_custom(model_name: str):
+    model_path = f"./best_{model_name}.pt"  # 현재 작업 디렉토리를 기준으로 상대 경로 사용
+    model = torch.hub.load("ultralytics/yolov5", "custom", path=model_path, force_reload=True)
+    return model
 
+# 서버 시작 시 모델 로드
+car_plate_model = load_model_custom("car_plate")
+face_model = load_model_custom("face")
 
 # 이미지 파일을 불러오는 함수
 def load_image(image_path):
     return cv2.imread(image_path)
-
 
 def read_bboxes(df):
     bboxes = df[["xmin", "ymin", "xmax", "ymax"]].values.tolist()
@@ -60,15 +62,15 @@ def read_item(item_id: int, q: Union[str, None] = None):
     return {"item_id": item_id, "q": q}
 
 
-@app.post("/image/upload")
-async def upload_image(file: UploadFile = File(...)):
+@app.post("/car_plate/image/upload")
+async def upload_car_plate_image(file: UploadFile = File(...)):
     # 이미지 파일을 메모리에서 바로 읽기
     image_data = await file.read()
     # image = Image.open(io.BytesIO(image_data))
     image = read_image_from_memory(image_data)
 
     # 이미지를 모델이 처리할 수 있는 형태로 변환
-    results = model(image)
+    results = car_plate_model(image)
 
     # 결과 처리 (예: 예측된 객체의 종류와 확률)
     results_data = results.pandas().xyxy[0]  # 감지된 객체 정보
@@ -87,16 +89,6 @@ async def upload_image(file: UploadFile = File(...)):
     # 각 바운딩 박스에 대해 모자이크 처리 적용
     for bbox in bboxes:
         image = apply_mosaic(image, bbox, 15)
-
-    # 처리된 이미지를 PIL 이미지로 변환
-    # final_image = Image.fromarray(cv_image[:, :, ::-1])  # BGR to RGB
-
-    # # PIL 이미지를 바이트로 변환하여 StreamingResponse로 반환
-    # img_byte_arr = io.BytesIO()
-    # final_image.save(img_byte_arr, format="JPEG")
-    # img_byte_arr = io.BytesIO(img_byte_arr.getvalue())
-
-    # return StreamingResponse(, media_type="image/jpeg")
 
     cv2.imwrite("car_plate.jpg", image)
 
@@ -125,7 +117,7 @@ def apply_mosaic_to_video(video_path):
             break
 
         # 프레임 처리
-        results = model(frame)
+        results = car_plate_model(frame)
         results_data = results.pandas().xyxy[0]
         bboxes = results_data[["xmin", "ymin", "xmax", "ymax"]].values.tolist()
 
@@ -140,8 +132,8 @@ def apply_mosaic_to_video(video_path):
 
     return temp_filename
 
-@app.post("/video/upload")
-async def upload_video(file: UploadFile = File(...)):
+@app.post("/car_plate/video/upload")
+async def upload_car_plate_video(file: UploadFile = File(...)):
     # 동영상 파일을 임시 파일로 저장
     with NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
         content = await file.read()
@@ -157,3 +149,41 @@ async def upload_video(file: UploadFile = File(...)):
             yield from file_like
 
     return StreamingResponse(iterfile(), media_type="video/mp4")
+
+@app.post("/face/image/upload")
+async def upload_face_image(file: UploadFile = File(...)):
+    # 이미지 파일을 메모리에서 바로 읽기
+    image_data = await file.read()
+    # image = Image.open(io.BytesIO(image_data))
+    image = read_image_from_memory(image_data)
+
+    # 이미지를 모델이 처리할 수 있는 형태로 변환
+    results = face_model(image)
+
+    # 결과 처리 (예: 예측된 객체의 종류와 확률)
+    results_data = results.pandas().xyxy[0]  # 감지된 객체 정보
+
+    bboxes = read_bboxes(results_data)
+
+    for idx, bbox in enumerate(bboxes):
+        bboxes[idx] = list(map(int, bbox))
+
+    print("results_data:", results_data)
+    print("bboxes:", bboxes)
+
+    # 모자이크 처리 적용
+    # image = load_image(image_data)
+
+    # 각 바운딩 박스에 대해 모자이크 처리 적용
+    for bbox in bboxes:
+        image = apply_mosaic(image, bbox, 15)
+
+    cv2.imwrite("car_plate.jpg", image)
+
+    _, encoded_image = cv2.imencode(".jpg", image)
+
+    # 인코딩된 바이트 배열을 io.BytesIO 객체로 변환
+    image_stream = io.BytesIO(encoded_image)
+
+    # StreamingResponse 객체 생성 및 반환
+    return StreamingResponse(image_stream, media_type="image/jpeg")
