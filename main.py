@@ -4,11 +4,12 @@ from fastapi import FastAPI, File, UploadFile, status, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from PIL import Image
 import io
+import zipfile
 import torch
 import cv2
 import numpy as np
 from tempfile import NamedTemporaryFile
-
+from typing import List
 app = FastAPI()
 
 def load_model_custom(model_name: str):
@@ -18,7 +19,7 @@ def load_model_custom(model_name: str):
 
 # 서버 시작 시 모델 로드
 car_plate_model = load_model_custom("car_plate")
-face_model = load_model_custom("face")
+face_model = load_model_custom("face (1)")
 
 # 이미지 파일을 불러오는 함수
 def load_image(image_path):
@@ -178,7 +179,7 @@ async def upload_face_image(file: UploadFile = File(...)):
     for bbox in bboxes:
         image = apply_mosaic(image, bbox, 15)
 
-    cv2.imwrite("car_plate.jpg", image)
+    cv2.imwrite("face.jpg", image)
 
     _, encoded_image = cv2.imencode(".jpg", image)
 
@@ -187,3 +188,36 @@ async def upload_face_image(file: UploadFile = File(...)):
 
     # StreamingResponse 객체 생성 및 반환
     return StreamingResponse(image_stream, media_type="image/jpeg")
+
+@app.post("car_plate/images/upload")
+async def upload_car_plate_image(files: List[UploadFile] = File(...)):
+    temp_file = NamedTemporaryFile(delete=False, suffix='.zip')
+    temp_filename = temp_file.name
+    temp_file.close()
+
+    # Zip 파일 생성
+    with zipfile.ZipFile(temp_filename, 'w') as zf:
+        for file in files:
+            image_data = await file.read()
+            image = read_image_from_memory(image_data)
+
+            # 이미지 처리 (예: 모자이크 적용)
+            results = car_plate_model(image)
+            results_data = results.pandas().xyxy[0]
+            bboxes = read_bboxes(results_data)
+
+            for bbox in bboxes:
+                bbox = list(map(int, bbox))
+                image = apply_mosaic(image, bbox, 15)
+
+            # 처리된 이미지를 임시 파일로 저장 후 zip에 추가
+            _, encoded_image = cv2.imencode(".jpg", image)
+            image_filename = file.filename
+            zf.writestr(image_filename, encoded_image)
+
+    # 생성된 zip 파일을 반환
+    def iterfile():
+        with open(temp_filename, mode="rb") as file_like:
+            yield from file_like
+
+    return StreamingResponse(iterfile(), media_type="application/zip")
