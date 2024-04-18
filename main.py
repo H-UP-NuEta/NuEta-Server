@@ -11,18 +11,17 @@ from fastapi.responses import StreamingResponse
 app = FastAPI()
 
 def load_model_custom(model_name: str):
-    model_path = f"./best_{model_name}.pt"
+    model_path = f"./weight/best_{model_name}.pt"
     model = torch.hub.load("ultralytics/yolov5", "custom", path=model_path, force_reload=True)
     return model
 
 # 서버 시작 시 모델 로드
 car_plate_model = load_model_custom("car_plate")
-# face_model = load_model_custom("last")
 
 # 모델 초기화
 net = cv2.dnn.readNetFromCaffe(
-    './deploy.prototxt',
-    './res10_300x300_ssd_iter_140000.caffemodel'
+    './weight/deploy.prototxt',
+    './weight/res10_300x300_ssd_iter_140000.caffemodel'
 )
 
 # 이미지 파일을 불러오는 함수
