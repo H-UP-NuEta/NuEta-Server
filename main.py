@@ -1,15 +1,12 @@
-from typing import Union
-
-from fastapi import FastAPI, File, UploadFile, status, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from PIL import Image
 import io
 import zipfile
 import torch
 import cv2
 import numpy as np
+from typing import List, Union
 from tempfile import NamedTemporaryFile
-from typing import List
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import StreamingResponse
 
 app = FastAPI()
 
@@ -154,26 +151,40 @@ async def upload_car_plate_video(file: UploadFile = File(...)):
 
     return StreamingResponse(iterfile(), media_type="video/mp4")
 
-@app.post("/face/image/upload")
-async def upload_face_image(file: UploadFile = File(...)):
+@app.post("/face/images/upload")
+async def upload_face_images(files: List[UploadFile] = File(...)):
+    if len(files) == 1:
+        return await process_single_image(files[0])
+    else:
+        return await process_multiple_images(files)
+
+async def process_single_image(file: UploadFile):
     image_data = await file.read()
     image = read_image_from_memory(image_data)
+    image = detect_and_mosaic_faces(image)
+    _, encoded_image = cv2.imencode(".jpg", image)
+    return StreamingResponse(io.BytesIO(encoded_image), media_type="image/jpeg")
 
+async def process_multiple_images(files: List[UploadFile]):
+    temp_file = NamedTemporaryFile(delete=False, suffix='.zip')
+    with zipfile.ZipFile(temp_file.name, 'w') as zf:
+        for file in files:
+            image_data = await file.read()
+            image = read_image_from_memory(image_data)
+            image = detect_and_mosaic_faces(image)
+            _, encoded_image = cv2.imencode(".jpg", image)
+            zf.writestr(file.filename, encoded_image.tobytes())
+    return StreamingResponse(open(temp_file.name, 'rb'), media_type="application/zip")
+
+def detect_and_mosaic_faces(image):
     (h, w) = image.shape[:2]
-    blob = cv2.dnn.blobFromImage(cv2.resize(image, (300, 300)), 1.0,
-        (300, 300), (104.0, 177.0, 123.0))
-
+    blob = cv2.dnn.blobFromImage(cv2.resize(image, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
     net.setInput(blob)
     detections = net.forward()
-
-    for i in range(0, detections.shape[2]):
+    for i in range(detections.shape[2]):
         confidence = detections[0, 0, i, 2]
-        if confidence > 0.4:
+        if confidence > 0.5:
             box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
             (startX, startY, endX, endY) = box.astype("int")
             image = apply_mosaic(image, [startX, startY, endX, endY])
-
-    _, encoded_image = cv2.imencode(".jpg", image)
-    image_stream = io.BytesIO(encoded_image)
-
-    return StreamingResponse(image_stream, media_type="image/jpeg")
+    return image
