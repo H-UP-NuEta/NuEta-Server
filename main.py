@@ -10,16 +10,23 @@ import cv2
 import numpy as np
 from tempfile import NamedTemporaryFile
 from typing import List
+
 app = FastAPI()
 
 def load_model_custom(model_name: str):
-    model_path = f"./best_{model_name}.pt"  # 현재 작업 디렉토리를 기준으로 상대 경로 사용
+    model_path = f"./best_{model_name}.pt"
     model = torch.hub.load("ultralytics/yolov5", "custom", path=model_path, force_reload=True)
     return model
 
 # 서버 시작 시 모델 로드
 car_plate_model = load_model_custom("car_plate")
-face_model = load_model_custom("face (1)")
+# face_model = load_model_custom("last")
+
+# 모델 초기화
+net = cv2.dnn.readNetFromCaffe(
+    './deploy.prototxt',
+    './res10_300x300_ssd_iter_140000.caffemodel'
+)
 
 # 이미지 파일을 불러오는 함수
 def load_image(image_path):
@@ -149,35 +156,24 @@ async def upload_car_plate_video(file: UploadFile = File(...)):
 
 @app.post("/face/image/upload")
 async def upload_face_image(file: UploadFile = File(...)):
-    # 이미지 파일을 메모리에서 바로 읽기
     image_data = await file.read()
-    # image = Image.open(io.BytesIO(image_data))
     image = read_image_from_memory(image_data)
 
-    # 이미지를 모델이 처리할 수 있는 형태로 변환
-    results = face_model(image)
+    (h, w) = image.shape[:2]
+    blob = cv2.dnn.blobFromImage(cv2.resize(image, (300, 300)), 1.0,
+        (300, 300), (104.0, 177.0, 123.0))
 
-    # 결과 처리 (예: 예측된 객체의 종류와 확률)
-    results_data = results.pandas().xyxy[0]  # 감지된 객체 정보
+    net.setInput(blob)
+    detections = net.forward()
 
-    bboxes = read_bboxes(results_data)
-
-    for idx, bbox in enumerate(bboxes):
-        bboxes[idx] = list(map(int, bbox))
-
-    print("results_data:", results_data)
-    print("bboxes:", bboxes)
-
-    # 각 바운딩 박스에 대해 모자이크 처리 적용
-    for bbox in bboxes:
-        image = apply_mosaic(image, bbox, 15)
-
-    cv2.imwrite("face.jpg", image)
+    for i in range(0, detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        if confidence > 0.4:
+            box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+            (startX, startY, endX, endY) = box.astype("int")
+            image = apply_mosaic(image, [startX, startY, endX, endY])
 
     _, encoded_image = cv2.imencode(".jpg", image)
-
-    # 인코딩된 바이트 배열을 io.BytesIO 객체로 변환
     image_stream = io.BytesIO(encoded_image)
 
-    # StreamingResponse 객체 생성 및 반환
     return StreamingResponse(image_stream, media_type="image/jpeg")
