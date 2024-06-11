@@ -13,11 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
 
 origins = [
-    "http://localhost.tiangolo.com",
-    "https://localhost.tiangolo.com",
-    "http://localhost",
-    "http://localhost:8080",
-    "http://localhost:5173"
+    "https://nueta.netlify.app",
 ]
 
 app.add_middleware(
@@ -28,10 +24,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 def load_model_custom(model_name: str):
     model_path = f"./weight/best_{model_name}.pt"
     model = torch.hub.load("ultralytics/yolov5", "custom", path=model_path, force_reload=True)
     return model
+
 
 # 서버 시작 시 모델 로드
 car_plate_model = load_model_custom("car_plate")
@@ -42,13 +40,16 @@ net = cv2.dnn.readNetFromCaffe(
     './weight/res10_300x300_ssd_iter_140000.caffemodel'
 )
 
+
 # 이미지 파일을 불러오는 함수
 def load_image(image_path):
     return cv2.imread(image_path)
 
+
 def read_bboxes(df):
     bboxes = df[["xmin", "ymin", "xmax", "ymax"]].values.tolist()
     return bboxes
+
 
 # 모자이크 처리 함수
 def apply_mosaic(img, bbox, mosaic_size=15):
@@ -92,12 +93,14 @@ def apply_mosaic_to_video(video_path):
 
     return temp_filename
 
+
 def read_image_from_memory(image_data):
     image_stream = io.BytesIO(image_data)
     image_stream.seek(0)
     file_bytes = np.asarray(bytearray(image_stream.read()), dtype=np.uint8)
     image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     return image
+
 
 @app.get("/")
 def read_root():
@@ -168,6 +171,7 @@ async def upload_car_plate_video(file: UploadFile = File(...)):
 
     return StreamingResponse(iterfile(), media_type="video/mp4")
 
+
 @app.post("/face/images/upload")
 async def upload_face_images(files: List[UploadFile] = File(...)):
     if len(files) == 1:
@@ -175,12 +179,14 @@ async def upload_face_images(files: List[UploadFile] = File(...)):
     else:
         return await process_multiple_images(files)
 
+
 async def process_single_image(file: UploadFile):
     image_data = await file.read()
     image = read_image_from_memory(image_data)
     image = detect_and_mosaic_faces(image)
     _, encoded_image = cv2.imencode(".jpg", image)
     return StreamingResponse(io.BytesIO(encoded_image), media_type="image/jpeg")
+
 
 async def process_multiple_images(files: List[UploadFile]):
     temp_file = NamedTemporaryFile(delete=False, suffix='.zip')
@@ -192,6 +198,7 @@ async def process_multiple_images(files: List[UploadFile]):
             _, encoded_image = cv2.imencode(".jpg", image)
             zf.writestr(file.filename, encoded_image.tobytes())
     return StreamingResponse(open(temp_file.name, 'rb'), media_type="application/zip")
+
 
 def detect_and_mosaic_faces(image):
     (h, w) = image.shape[:2]
